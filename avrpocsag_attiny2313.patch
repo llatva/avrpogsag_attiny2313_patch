@@ -1,0 +1,156 @@
+--- avr pocsag rev 1_1.asm	2010-03-14 08:43:56.000000000 +0200
++++ orig/attiny-pocsag11.asm	2010-03-14 08:47:20.000000000 +0200
+@@ -25,7 +25,7 @@
+ ; 1.0 first release
+  
+ .nolist
+-.include "2313def.inc"	
++.include "tn2313def.inc"
+ .list
+ .listmac
+ 
+@@ -74,6 +74,15 @@
+ 
+ 
+ 
++;--- ascii char codes
++.equ	ctrl_c 		= 0x03
++.equ	etx		= 0x03
++.equ	eot		= 0x04
++.equ	bel 		= 0x07 		; bell
++.equ	bs  		= 0x08		; back space
++.equ	cr  		= 0x0d		; carriage return 
++.equ	lf  		= 0x0a		; line feed
++
+ ;--- some program equates and constants
+ .equ	ram_begin	= 0x60		; start of ram on 2313	
+ .equ	max_str_len	= 80		; max len of string from console
+@@ -83,14 +92,6 @@
+ .equ	console_baud 	= 9600
+ .equ	isr_divider 	= (0xffff - (clock/9600)) + 15
+ 
+-;--- ascii char codes
+-.equ	ctrl_c 		= 0x03
+-.equ	etx		= 0x03
+-.equ	eot		= 0x04
+-.equ	bel 		= 0x07 		; bell
+-.equ	bs  		= 0x08		; back space
+-.equ	cr  		= 0x0d		; carriage return 
+-.equ	lf  		= 0x0a		; line feed
+ 
+ 
+ ;.equ	frame_sync	= 0x7CD215D8	;  pocsag frame sync word (for reference)
+@@ -163,7 +164,7 @@
+ .def	poc_baud_div	= r25	; divide isr 9600 tic to 2400,1200,512
+ 
+ .def	poc_char_pnt	= r26	; pointer to next message char to process 
+-.def	poc_char	= r27	; current char being processed
++.def	poc_char 	= r27	; current char being processed
+ .def	yl		= r28	; used in flash2buff to point to destination
+ .def	yh		= r29	; 
+ .def	zl		= r30	; used for indirect indexing   
+@@ -291,10 +292,10 @@
+ ;--- rs-232 char reception isr, checks for errors and discards bad chars  
+ uart_rx_isr:	in	isr_save,SREG		; store SREG
+ 		push	temp			
+-		sbic	USR, FE			; skip if framing error
++		sbic	UCSRA, FE			; skip if framing error
+ 		rjmp	uart_err		; 
+ 		in	temp, UDR		; get rx byte
+-		sbic	USR, OR			; skip if overrun error
++		sbic	UCSRA, DOR			; skip if overrun error
+ 		rjmp	uart_err			; 
+ 		mov	u_data,temp		; save actual data
+ 		sbr	flags,(1<<uart_rx)	; set received data flag
+@@ -330,9 +331,9 @@
+ 		out	DDRD,temp
+ ;--- setup uart, 9600 baud, int on rx, no tx ints
+ 		ldi	temp,((clock / console_baud) / 16) -1
+-		out	UBRR,temp			; Set baud rate generator
++		out	UBRRL,temp			; Set baud rate generator
+ 		ldi	temp, (1<<RXCIE)|(1<<RXEN)|(1<<TXEN) ; enable rxc interrupts
+-		out	UCR,temp			; enable UART tx & rx  w/o interrupts
++		out	UCSRB,temp			; enable UART tx & rx  w/o interrupts
+ ;--- set up tmr0
+ 
+ 		ldi	temp,2				; timer 0 prescale/8
+@@ -644,12 +645,14 @@
+ ;--- enter with xl pointing to first byte of zero terminated data string
+ ;--- uses temp,bit_cnt,byte_cnt,poc_char,poc_char_ptr
+ ;--- t bit flag indicates padding in progress
+-pack_data:	tst	byte_cnt			; any bits from left from last char?
++pack_data:	
++		tst	byte_cnt			; any bits from left from last char?
+ 		breq	pc + 2				; nope
+ 		rcall	stuff_char			; otherwise shift in those left over bits	
+ 		brts	pad_data			; last frame was padded, finish up
+ 
+-get_poc_char:	ld	poc_char,x+			; get char
++get_poc_char:	
++		ld	poc_char,x+			; get char
+ 		tst	poc_char			; all done
+ 		breq	pad_data
+ 
+@@ -902,7 +905,8 @@
+ 
+ ;--- send zero terminated string from ram as morse code
+ ;--- xl points to first char
+-send_cw_string:	ld	poc_char,x+		; get char
++send_cw_string:	
++		ld	poc_char,x+		; get char
+ 		tst	poc_char		; are we done?
+ 		brne	pc + 2
+ 		ret
+@@ -1137,7 +1141,7 @@
+ 		ret
+ 
+ ;---- put char to console
+-putc:		sbis	USR,UDRE		;Is UART transmitter ready?
++putc:		sbis	UCSRA,UDRE		;Is UART transmitter ready?
+ 		rjmp	putc			;If not, wait
+ 		out	UDR,temp		;Put character to UART
+ 		ret
+@@ -1182,7 +1186,7 @@
+ ;--- internal eeprom routines
+ ;--- read eeprom (post incs EEAR!)
+ EERead:		cli
+-		sbic	EECR,EEWE	; if EEWE not clear
++		sbic	EECR,EEPE	; if EEPE not clear
+ 		rjmp	EERead		;    keep waiting
+ 
+ 		out	EEAR,EEaddr
+@@ -1192,13 +1196,13 @@
+ 
+ ;--- write EEPROM (post incs EEAR!)
+ EEWrite:	cli
+-		sbic	EECR,EEWE	; if EEWE not clear
++		sbic	EECR,EEPE	; if EEPE not clear
+ 		rjmp	EEWrite		;    keep waiting
+  
+  		out	EEAR,EEaddr
+ 		out	EEDR,EEdata	; output the data
+-		sbi 	EECR,EEMWE	; set master write enable	
+-		sbi	EECR,EEWE	; set EEPROM Write strobe
++		sbi 	EECR,EEMPE	; set master write enable	
++		sbi	EECR,EEPE	; set EEPROM Write strobe
+ 
+ inc_eear:	inc	EEaddr
+ 		sei
+@@ -1292,7 +1296,7 @@
+ ; codespace stored  string storage 
+ ;*********************************************************************
+ ;--- message strings----------------
+-_hello:		.db	cr,lf,"AVR_POCSAG 1.0 Copyright Henry Carl Ott N2RVQ",cr,lf,0
++_hello:		.db	cr,lf,"AVR_POCSAG 1.1 Copyright Henry Carl Ott N2RVQ",cr,lf,0
+ _error:		.db	bel,cr,lf,"ERROR",0
+ _debug:		.db	cr,lf,"DEBUG=",0
+ _frame_sync:	.db	0x7C,0xD2,0x15,0xD8	;  pocsag frame sync word 
+@@ -1381,7 +1385,6 @@
+ .org		0x40
+ msg2_pin:	.db	0x12,0xd6,0x87
+ msg2_flags:	.db	(1 << m_fun_1) | (1<< m_fun_1) | (1 << m_type_alpha) 
+-msg2_data:	.db	"AVR POCSAG TEST cap=1234567",0x00	
+-
++msg2_data:	.db	"AVR POCSAG TEST cap=1234567",0x00
+ 
+ 
